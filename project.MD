@@ -57,7 +57,8 @@ T8N is a macOS background agent that watches the active window, detects when the
     ```json
     {"escalate": true|false, "context_type": "config|editor_config|dashboard|other", "reason": "<10 words"}
     ```
-- Hard timeout 2s; on timeout or parse failure, do NOT escalate (fail quiet).
+- Hard timeout 3.0s (measured floor on base M2 hardware: ~2.4s per uncached llama3.1:8b classification; 2.0s guarantees permanent silence). On timeout or parse failure, do NOT escalate (fail quiet).
+- **No stacking:** at most one Stage B classification in flight at any time. If a new frame survives Stage A while a classification is running, drop it — never queue. Frames are disposable; a config screen that matters will still be on screen next poll.
 
 ### 5. Claude Escalation (`escalate.py`)
 - Model: `claude-sonnet-4-6` via Anthropic API. Input: screenshot (base64 PNG), OCR text, app/window title, rolling context buffer.
@@ -109,8 +110,8 @@ Each milestone must end with: code merged, acceptance test passing, STATE.md upd
 - **Accept:** open a Stripe-like settings page screenshot fixture; OCR output contains the key visible strings; buffer shows last 10 windows.
 
 ### M2 — Stage A heuristics + Ollama filter
-- Keyword/domain heuristics; Ollama classification with strict JSON parsing + 2s timeout.
-- **Accept:** fixture set of 20 frames (10 config contexts, 10 normal browsing/coding); Stage A+B escalate ≥8 of the config frames and ≤1 of the normal frames.
+- Keyword/domain heuristics; Ollama classification with strict JSON parsing + 3.0s timeout; single-classification-in-flight (no stacking, no queue).
+- **Accept:** fixture set of 20 frames (10 config contexts, 10 normal browsing/coding); Stage A+B escalate ≥8 of the config frames and ≤1 of the normal frames. Firing a second Stage-A survivor while a classification is in flight drops the frame with a log line, never queues it.
 
 ### M3 — Claude escalation
 - API call with image + text + buffer; JSON contract enforced; confidence/severity gating.

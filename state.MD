@@ -28,7 +28,7 @@
 - [x] `python -m t8n.filter_local <image> [app] [title]` standalone runner
 - [x] Fixture set: 20 synthetic frames (10 config, 10 normal) via make_fixtures.py
 - [x] Wire filter into the capture loop (escalate decision logged, no OCR text/reason in logs)
-- [x] Acceptance: Stage A+B escalate ≥8/10 config frames and ≤1/10 normal frames — PASSED 2026-07-08 with prompt filter_v1 + ollama_timeout_seconds=3.0 (local config): 10/10 config escalated, 0/10 normal escalated. With spec-default 2.0s the same run FAILS (ReadTimeout on every uncached call — see proposed scope change). 22 fast unit tests green. Awaiting user decision on timeout default + confirmation before M3.
+- [x] Acceptance: Stage A+B escalate ≥8/10 config frames and ≤1/10 normal frames — PASSED 2026-07-08 with prompt filter_v1 + the (now-approved) 3.0s timeout: 10/10 config escalated, 0/10 normal escalated. 22 fast unit tests green. Re-verified after 3.0 became the shipped default. M2 CONFIRMED by user 2026-07-08.
 
 ### M3 — Claude escalation
 - [ ] (see PROJECT.md)
@@ -56,17 +56,25 @@
 - 2026-07-08: Stage B logs never include the model's `reason` field (it paraphrases screen content); only escalate bool + context_type are logged.
 - 2026-07-08: Prompt scores — filter_v1 on the 20-frame set: config 10/10 escalated, normal 0/10 escalated (all 10 normal frames were dropped by Stage A; none reached Ollama).
 - 2026-07-08: Ollama server was not running at session start; started with `ollama serve` (nohup, background). It must be running for Stage B; if it is down, Stage B fails quiet and T8N stays silent.
+- 2026-07-08: USER APPROVED: `ollama_timeout_seconds` default is 3.0 (was 2.0). PROJECT.md §4 + M2 milestone updated; code default changed in config.py. Proposal cleared.
+- 2026-07-08: No-stacking rule (PROJECT.md §4): max one Stage B classification in flight, drop-never-queue. Verified structurally enforced — the loop is single-threaded and stage_b blocks the poll cycle, so a concurrent classification or queue is impossible. The observable form of a drop is a cycle overrunning the poll interval; app.py now logs `event=poll_overrun_frame_dropped` there. Any future move to threading/async must add an explicit in-flight guard to keep this rule.
 
 ## Blockers
 - None. (Screen Recording permission was granted mid-session; capture verified working.)
 
 ## Proposed scope changes
-- **Raise default `ollama_timeout_seconds` from 2.0 to 3.0.** PROJECT.md specifies "hard timeout 2s" for Stage B, but measured reality on the dev machine (base M2, 16GB, llama3.1:8b Q4 at 100% GPU): an uncached classification call takes a consistent 2.43s (0.92s prompt eval + 1.36s generation at ~18 tok/s — the hardware floor). With 2.0s every novel frame times out and T8N stays silent forever; with 3.0s the M2 acceptance scores 10/10 config, 0/10 normal. 3.0s still fits inside the 3s poll interval. Code default remains 2.0 per spec; 3.0 is set only in this machine's ~/.t8n/config.yaml. Needs user approval to change the shipped default.
+- None. (Anything here requires explicit user approval before implementation.)
 
 ## Notes for next session
-- M2 complete pending user sign-off + timeout decision. Next: M3 (escalate.py — Claude API with image+text+buffer, strict JSON contract, confidence/severity gating; escalation prompt as t8n/prompts/escalate_v1.txt; 10 risky + 10 benign config fixtures). Requires ANTHROPIC_API_KEY.
+- M2 complete and confirmed; 3.0s timeout is the shipped default. Next: M3 (escalate.py — Claude API with image+text+buffer, strict JSON contract, confidence/severity gating; escalation prompt as t8n/prompts/escalate_v1.txt; 10 risky + 10 benign config fixtures). Requires ANTHROPIC_API_KEY.
 - Acceptance tests are marked `acceptance` (slow, need Ollama/API): `pytest -m acceptance -s`. Fast suite: `pytest -m "not acceptance"`.
 - Dev venv: `.venv` (Python 3.12), `pip install -e ".[dev]"` already done. Tests: `.venv/bin/pytest tests/`. Lint: `.venv/bin/ruff check t8n/ tests/`.
 - Cross-cutting logging helper lives in `t8n/log.py` (not a PROJECT.md stage module — infra, not pipeline). `kv()` renders one-line key=value entries; never log OCR text or screenshot contents.
 - Denylist app-skip is already enforced in the M0 loop (`app._is_denylisted`); M6 extends it (domains, incognito, YAML editing UX), never replaces it.
 - Repo pushed to github.com/jeremiahbeamup11/T8N (gh credential helper configured via `gh auth setup-git`).
+
+## Backlog (post-M6, do not implement)
+- Smaller local model for Stage B: base-M2 measured floor is ~2.4s on llama3.1:8b;
+  slower tester hardware (M1 Air) may exceed the 3.0s timeout. Candidate fix is a
+  3B-class model (llama3.2:3b or qwen2.5:3b), validated against the same 20-fixture
+  set before swapping. Only act if tester machines show timeout rates in t8n report.

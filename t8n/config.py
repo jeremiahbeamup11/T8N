@@ -31,7 +31,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "poll_interval_seconds": 3.0,
     "phash_threshold": 6,
     "ollama_model": "llama3.1:8b",
-    "ollama_timeout_seconds": 2.0,
+    "ollama_timeout_seconds": 3.0,
     "escalation_model": "claude-sonnet-4-6",
     "escalation_daily_budget": 200,
     "anthropic_api_key": "",  # prefer ANTHROPIC_API_KEY env var

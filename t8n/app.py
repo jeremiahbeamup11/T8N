@@ -109,6 +109,11 @@ def run(duration_seconds: float | None = None) -> int:
             if duration_seconds is not None and time.monotonic() - started >= duration_seconds:
                 break
             elapsed = time.monotonic() - cycle_start
+            if elapsed > cfg.poll_interval_seconds:
+                # No-stacking rule: the loop is single-threaded, so a running
+                # Stage B call blocks capture — frames due during the overrun
+                # are dropped, never queued. This is the audit trail for that.
+                logger.info(kv(event="poll_overrun_frame_dropped", cycle_s=f"{elapsed:.1f}"))
             time.sleep(max(0.0, cfg.poll_interval_seconds - elapsed))
     except KeyboardInterrupt:
         pass

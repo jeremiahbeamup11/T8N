@@ -139,10 +139,25 @@ def classify(
 
 
 def warm(cfg: config.Config) -> bool:
-    """Load the model into memory so real calls fit the 2s timeout. Non-fatal."""
+    """Load the model and exercise a full-size prompt eval. Non-fatal.
+
+    A trivial 1-token warm-up loads weights but leaves the first real
+    (large-batch) prompt eval slow enough to breach the hard timeout; a
+    representative dummy call pays that cost up front instead.
+    """
+    dummy = (
+        load_prompt()
+        .replace("{app_name}", "Warmup")
+        .replace("{window_title}", "warmup")
+        .replace("{ocr_text}", "warmup text " * 200)
+    )
     try:
-        ollama.Client(timeout=30).generate(
-            model=cfg.ollama_model, prompt="ok", options={"num_predict": 1}
+        ollama.Client(timeout=60).generate(
+            model=cfg.ollama_model,
+            prompt=dummy,
+            format="json",
+            keep_alive="30m",
+            options={"temperature": 0, "num_predict": 48},
         )
         return True
     except Exception as exc:
