@@ -1,4 +1,4 @@
-"""Orchestrator: wires the pipeline stages together. M0 scope: capture + dedupe.
+"""Orchestrator: wires the pipeline stages together. M1 scope: capture → dedupe → OCR.
 
 Run standalone: `python -m t8n.app [duration_seconds]`.
 """
@@ -11,6 +11,7 @@ import time
 from t8n import capture, config
 from t8n.diff import ChangeDetector
 from t8n.log import get_logger, kv
+from t8n.ocr import ContextBuffer, ocr_image
 
 logger = get_logger("app")
 
@@ -29,14 +30,22 @@ def _is_denylisted(info: capture.WindowInfo, cfg: config.Config) -> bool:
 
 
 def run(duration_seconds: float | None = None) -> int:
-    """Capture loop: poll, screenshot, phash-dedupe. M0 ends here."""
+    """Capture loop: poll, screenshot, phash-dedupe, OCR survivors. M1 ends here."""
     cfg = config.load()
     if not capture.ensure_permission_or_explain():
         logger.error(kv(event="permission_missing"))
         return 1
 
     detector = ChangeDetector(threshold=cfg.phash_threshold)
-    stats = {"polls": 0, "denylisted": 0, "capture_failed": 0, "unchanged": 0, "processed": 0}
+    context = ContextBuffer(maxlen=10)
+    stats = {
+        "polls": 0,
+        "denylisted": 0,
+        "capture_failed": 0,
+        "unchanged": 0,
+        "processed": 0,
+        "ocr_failed": 0,
+    }
     logger.info(
         kv(event="start", poll_s=cfg.poll_interval_seconds, phash_threshold=cfg.phash_threshold)
     )
@@ -51,6 +60,7 @@ def run(duration_seconds: float | None = None) -> int:
                 if info is None or _is_denylisted(info, cfg):
                     stats["denylisted"] += info is not None
                 else:
+                    context.observe(info.app_name, info.window_title)
                     frame = capture.capture_window(info.window_id)
                     if frame is None:
                         stats["capture_failed"] += 1
@@ -59,7 +69,19 @@ def run(duration_seconds: float | None = None) -> int:
                         identity = f"{info.app_name}|{info.window_title}"
                         if detector.is_changed(frame, identity):
                             stats["processed"] += 1
-                            logger.info(kv(event="frame_processed", app=info.app_name))
+                            text = ocr_image(frame)  # text goes downstream, never to logs
+                            if text is None:
+                                stats["ocr_failed"] += 1
+                                logger.info(kv(event="ocr_failed", app=info.app_name))
+                            else:
+                                logger.info(
+                                    kv(
+                                        event="frame_processed",
+                                        app=info.app_name,
+                                        ocr_chars=len(text),
+                                        ctx_len=len(context.entries()),
+                                    )
+                                )
                         else:
                             stats["unchanged"] += 1
                         frame.unlink(missing_ok=True)  # guardrail: no frames kept
