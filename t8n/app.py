@@ -1,4 +1,4 @@
-"""Orchestrator: wires the pipeline stages together. M1 scope: capture → dedupe → OCR.
+"""Orchestrator: wires the pipeline stages together. M2 scope: capture → dedupe → OCR → filter.
 
 Run standalone: `python -m t8n.app [duration_seconds]`.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import time
 
-from t8n import capture, config
+from t8n import capture, config, filter_local
 from t8n.diff import ChangeDetector
 from t8n.log import get_logger, kv
 from t8n.ocr import ContextBuffer, ocr_image
@@ -38,6 +38,7 @@ def run(duration_seconds: float | None = None) -> int:
 
     detector = ChangeDetector(threshold=cfg.phash_threshold)
     context = ContextBuffer(maxlen=10)
+    filter_local.warm(cfg)  # non-fatal; first real call otherwise misses the timeout
     stats = {
         "polls": 0,
         "denylisted": 0,
@@ -45,6 +46,8 @@ def run(duration_seconds: float | None = None) -> int:
         "unchanged": 0,
         "processed": 0,
         "ocr_failed": 0,
+        "stage_a_pass": 0,
+        "escalations": 0,
     }
     logger.info(
         kv(event="start", poll_s=cfg.poll_interval_seconds, phash_threshold=cfg.phash_threshold)
@@ -82,6 +85,21 @@ def run(duration_seconds: float | None = None) -> int:
                                         ctx_len=len(context.entries()),
                                     )
                                 )
+                                if filter_local.stage_a(info.app_name, info.window_title, text):
+                                    stats["stage_a_pass"] += 1
+                                    verdict = filter_local.stage_b(
+                                        info.app_name, info.window_title, text, cfg
+                                    )
+                                    if verdict is not None and verdict.escalate:
+                                        stats["escalations"] += 1
+                                        # M3 sends these to Claude; for now log the decision only
+                                        logger.info(
+                                            kv(
+                                                event="filter_escalate",
+                                                app=info.app_name,
+                                                context_type=verdict.context_type,
+                                            )
+                                        )
                         else:
                             stats["unchanged"] += 1
                         frame.unlink(missing_ok=True)  # guardrail: no frames kept
