@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "t8n"
+version = "0.1.0"
+description = "macOS proactive mistake-prevention agent: warns before risky config changes."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-Vision>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+    "Pillow>=10.0",
+    "ImageHash>=4.3",
+    "ollama>=0.3",
+    "anthropic>=0.40",
+    "rumps>=0.4",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6", "pytest>=8.0"]
+
+[project.scripts]
+t8n = "t8n.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["t8n*"]
+
+[tool.setuptools.package-data]
+"t8n.prompts" = ["*.txt"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ANN"]
